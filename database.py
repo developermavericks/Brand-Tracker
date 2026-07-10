@@ -167,10 +167,17 @@ def add_article(company_id: int, title: str, link: str, published_at: str, sourc
         w_art = sh.worksheet("Articles")
         rows = w_art.get_all_values()
         
-        # Check for duplicate links globally (Column 2 is link)
+        # Check for duplicate links or titles globally (Column 1 is title, Column 2 is link)
+        norm_link = link.strip().lower()
+        norm_title = title.strip().lower()
+        
         for row in rows[1:]:
-            if len(row) > 1 and row[1].strip() == link.strip():
-                return False
+            if len(row) > 1:
+                db_title = row[0].strip().lower()
+                db_link = row[1].strip().lower()
+                # If either the link or title matches, it is a duplicate
+                if db_link == norm_link or db_title == norm_title:
+                    return False
                 
         w_art.append_row([
             title,
@@ -182,6 +189,7 @@ def add_article(company_id: int, title: str, link: str, published_at: str, sourc
     except Exception as e:
         print(f"Error adding article: {e}")
         return False
+
 
 def get_recent_articles(limit=50):
     try:
