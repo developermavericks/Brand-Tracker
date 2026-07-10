@@ -26,6 +26,9 @@ def get_gsheet():
     try:
         if creds_json_str:
             creds_info = json.loads(creds_json_str)
+            if "private_key" in creds_info:
+                # Replace escaped newlines with actual newline characters
+                creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n")
             creds = Credentials.from_service_account_info(creds_info, scopes=scopes)
         elif os.path.exists(creds_file):
             creds = Credentials.from_service_account_file(creds_file, scopes=scopes)
