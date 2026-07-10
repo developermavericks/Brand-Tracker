@@ -58,11 +58,15 @@ def init_db():
         
     # 2. Verify/Create 'Articles' worksheet (Only 4 core columns now)
     try:
-        sh.worksheet("Articles")
+        w_art = sh.worksheet("Articles")
+        if w_art.col_count > 4:
+            w_art.resize(rows=w_art.row_count, cols=4)
+            print("Resized Articles worksheet to 4 columns.")
     except gspread.exceptions.WorksheetNotFound:
         sh.add_worksheet(title="Articles", rows="2000", cols="4")
         w = sh.worksheet("Articles")
         w.append_row(["title", "link", "published_at", "source"])
+
         
     # 3. Verify/Create 'Status' worksheet
     try:
