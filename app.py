@@ -2,12 +2,11 @@ import streamlit as st
 import pandas as pd
 import warnings
 warnings.filterwarnings("ignore", category=SyntaxWarning)
-from database import init_db, add_company, remove_company, get_all_companies, get_recent_articles, get_last_fetch_time, set_last_fetch_time, get_articles_for_brand
+from database import init_db, add_company, remove_company, get_all_companies, get_recent_articles, get_last_fetch_time, set_last_fetch_time
 from scheduler import init_scheduler
 from fetcher import fetch_all_companies
 from notifier import send_notification
 import datetime
-from bs4 import BeautifulSoup
 import streamlit.components.v1 as components
 import io
 
@@ -70,10 +69,8 @@ with st.sidebar:
             next_fetch_ist = last_fetch_ist + datetime.timedelta(minutes=5)
             
             # Next fetch for JS (ISO format for the Date constructor)
-            # We need the absolute next fetch in UTC for the JS timer to work consistently
             next_fetch_utc = last_fetch_dt + datetime.timedelta(minutes=5)
             
-            # Text based times in IST
             st.write(f"**Last Check (IST):** {last_fetch_ist.strftime('%H:%M:%S')}")
             st.write(f"**Next Check (IST):** {next_fetch_ist.strftime('%H:%M:%S')}")
             
@@ -84,7 +81,6 @@ with st.sidebar:
                 <div id="countdown" style="font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; color: #00E676; text-shadow: 0 0 10px rgba(0,230,118,0.3);">--:--</div>
             </div>
             <script>
-                // We pass the UTC ISO string so JS correctly identifies it and converts to browser local time
                 var nextFetch = new Date('{next_fetch_utc.isoformat()}').getTime();
                 var countdownEl = document.getElementById("countdown");
                 
@@ -97,8 +93,6 @@ with st.sidebar:
                         countdownEl.innerHTML = "WAITING...";
                         countdownEl.style.color = "#FFCA28";
                         
-                        // Prevent infinite loop by tracking the last automatically reloaded timestamp
-                        // It will strictly reload the parent frame ONCE per expired timeframe.
                         if (sessionStorage.getItem('last_timer_reload') !== nextFetch.toString()) {{
                             sessionStorage.setItem('last_timer_reload', nextFetch.toString());
                             setTimeout(function() {{ 
@@ -115,7 +109,7 @@ with st.sidebar:
                         
                         countdownEl.innerHTML = minStr + ":" + secStr;
                         if (minutes < 1) {{
-                            countdownEl.style.color = "#FFCA28"; // Warning yellow when under 1 min
+                            countdownEl.style.color = "#FFCA28";
                             countdownEl.style.textShadow = "0 0 10px rgba(255,202,40,0.3)";
                         }}
                     }}
@@ -136,74 +130,56 @@ with st.sidebar:
             new_arts = fetch_all_companies()
             if new_arts:
                 send_notification(new_arts)
-                st.success(f"Found {len(new_arts)} new articles and sent notification.")
+                st.success(f"Found {len(new_arts)} new articles and updated sheet.")
             else:
                 st.info("No new articles found.")
             st.rerun()
 
-    # Brand Report Download Section
+    # Brand Report Download Section (Consolidated Excel Sheet)
     st.markdown("---")
-    st.subheader("📊 Download Brand Report")
+    st.subheader("📊 Download Compiled Report")
     
-    brand_names = [comp['name'] for comp in companies]
-    report_brand = st.selectbox("Select Brand for Report", [""] + brand_names, index=0, help="Select a brand to download its articles in Excel format")
+    # Fetch all articles from sheet (max limit 5000)
+    all_articles = get_recent_articles(5000)
     
-    if report_brand:
-        brand_articles = get_articles_for_brand(report_brand)
-        if brand_articles:
-            # Prepare data for Excel
-            report_df = pd.DataFrame(brand_articles)
-            
-            # Format report as requested: url, title, agency, time of publishing
-            export_df = report_df[['link', 'title', 'source', 'published_at']].copy()
-            export_df.columns = ['URL', 'Title', 'Agency', 'Time of Publishing']
-            
-            # Create Excel file in memory
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                export_df.to_excel(writer, index=False, sheet_name='News Articles')
-            processed_data = output.getvalue()
-            
-            st.download_button(
-                label=f"📥 Download {report_brand} Report",
-                data=processed_data,
-                file_name=f"{report_brand}_news_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
-        else:
-            st.warning(f"No articles found for {report_brand}.")
+    if all_articles:
+        report_df = pd.DataFrame(all_articles)
+        
+        # Format report columns: URL, Title, Agency, Time of Publishing
+        export_df = report_df[['link', 'title', 'source', 'published_at']].copy()
+        export_df.columns = ['URL', 'Title', 'Agency', 'Time of Publishing']
+        
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            export_df.to_excel(writer, index=False, sheet_name='News Articles')
+        processed_data = output.getvalue()
+        
+        st.download_button(
+            label="📥 Download Excel Report",
+            data=processed_data,
+            file_name=f"compiled_news_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+    else:
+        st.info("No articles in database yet.")
 
 # Main area for displaying articles
 st.header("Recent Articles")
 
-# Brand Filter & Search Bar
-filter_col1, filter_col2 = st.columns([0.3, 0.7])
-
-with filter_col1:
-    brands_list = ["All Brands"] + [comp['name'] for comp in get_all_companies()]
-    selected_brand = st.selectbox("🔍 Filter by Brand", brands_list)
-
-with filter_col2:
-    search_query = st.text_input("Looking for something specific?", placeholder="Type to search within Titles or Sources...")
+# Search Bar
+search_query = st.text_input("Looking for something specific?", placeholder="Type to search within Titles or Sources...")
 
 recent_articles = get_recent_articles(500)
 
 if not recent_articles:
     st.info("No articles found yet. Please add a company and wait for the fetcher.")
 else:
-    # Convert to DataFrame to display cleanly
     df = pd.DataFrame(recent_articles)
     
-    # 1) Correctly parse actual timestamps and sort purely by LATEST published time
     df['parsed_date'] = pd.to_datetime(df['published_at'], format='mixed', utc=True)
     df = df.sort_values(by='parsed_date', ascending=False)
-    
-    # 2) Filter by select box dropdown
-    if selected_brand != "All Brands":
-        df = df[df['company_name'] == selected_brand]
         
-    # 3) Filter by raw text search bar query
     if search_query:
         mask = (
             df['title'].str.contains(search_query, case=False, na=False) |
@@ -211,16 +187,11 @@ else:
         )
         df = df[mask]
     
-    # Warning if filters wipe the view
     if df.empty:
         st.warning(f"No results found for your search criteria.")
     else:
-        # 4) India Time (IST) Conversion & Relative Time
         def format_ist_and_relative(dt):
-            # IST is UTC + 5:30
             ist_dt = dt + datetime.timedelta(hours=5, minutes=30)
-            
-            # Relative time
             now = datetime.datetime.now(datetime.timezone.utc)
             diff = now - dt
             seconds = diff.total_seconds()
@@ -238,41 +209,19 @@ else:
             axis=1, result_type='expand'
         )
 
-        # Render cards with expanders instead of a static table
+        # Render clean feed cards
         for _, row in df.iterrows():
-            sentiment = str(row.get('sentiment', 'Neutral') or 'Neutral')
-            sent_color = "#00D166" if sentiment == "Positive" else "#FF4B4B" if sentiment == "Negative" else "#94A3B8"
-            
-            # Individual Article Card
-            with st.expander(f"🏢 **{row['company_name']}**: {row['title']}", expanded=False):
-                col_a, col_b, col_c = st.columns([0.2, 0.6, 0.2])
-                
-                with col_a:
-                    st.markdown(f"**Sentiment**")
-                    st.markdown(f"<span style='color: {sent_color}; font-weight: bold;'>{sentiment.upper()}</span>", unsafe_allow_html=True)
-                
-                with col_b:
-                    st.markdown(f"**Full Article Content**")
-                    # Content can be raw HTML from RSS or clean text from Newspaper3k
-                    raw_content = str(row.get('summary') or 'No content available.')
-                    
-                    # If it looks like HTML, strip it for a cleaner look
-                    if '<' in raw_content and '>' in raw_content:
-                        clean_text = BeautifulSoup(raw_content, "html.parser").get_text()
-                    else:
-                        clean_text = raw_content
-
-                    # Use a text area or a scrollable container if the text is very long
-                    if len(clean_text) > 1000:
-                        st.text_area("Original Text", value=clean_text, height=300, disabled=True, label_visibility="collapsed")
-                    else:
-                        st.markdown(f"{clean_text}")
-                
-                with col_c:
-                    st.markdown(f"**Details**")
-                    st.write(f"Source: {row['source']}")
-                    st.write(f"IST: {row['Time (IST)']}")
-                    st.write(f"Relative: {row['Relative Time']}")
-                
-                st.markdown(f"<a href='{row['link']}' target='_blank' style='text-decoration: none; color: #4DA8DA;'>View Full Article 🔗</a>", unsafe_allow_html=True)
-
+            st.markdown(
+                f"""
+                <div style="background-color: #1E293B; padding: 15px; border-radius: 8px; margin-bottom: 10px; border-left: 5px solid #3B82F6;">
+                    <div style="font-size: 16px; font-weight: bold; line-height: 1.4;">
+                        <a href="{row['link']}" target="_blank" style="text-decoration: none; color: #60A5FA;">{row['title']}</a>
+                    </div>
+                    <div style="font-size: 13px; color: #94A3B8; margin-top: 6px;">
+                        <span>📰 {row['source']}</span> &nbsp;|&nbsp; 
+                        <span>⏰ {row['Time (IST)']} ({row['Relative Time']})</span>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )

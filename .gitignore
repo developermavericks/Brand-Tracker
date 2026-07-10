@@ -42,3 +42,5 @@ gsd-plugin/
 debug_*.py
 test_regional_fetch.py
 test_fetch.py
+google_creds.json
+
