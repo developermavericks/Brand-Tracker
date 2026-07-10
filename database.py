@@ -15,7 +15,18 @@ def get_gsheet():
     if _spreadsheet is not None:
         return _spreadsheet
         
-    creds_json_str = os.getenv("GOOGLE_CREDS_JSON")
+    creds_json_str = None
+    # Try loading directly from Streamlit's native secrets manager to bypass env var bugs
+    try:
+        import streamlit as st
+        if "GOOGLE_CREDS_JSON" in st.secrets:
+            creds_json_str = st.secrets["GOOGLE_CREDS_JSON"]
+    except Exception:
+        pass
+        
+    if not creds_json_str:
+        creds_json_str = os.getenv("GOOGLE_CREDS_JSON")
+        
     creds_file = "google_creds.json"
     
     scopes = [
