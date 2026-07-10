@@ -10,42 +10,85 @@ load_dotenv()
 _client = None
 _spreadsheet = None
 
+def _normalize_private_key(key):
+    """Repair the ways a PEM private key gets mangled when it round-trips
+    through TOML/JSON/env-var storage: escaped newlines left un-decoded,
+    stray CRLF, surrounding quotes/whitespace, or a missing trailing newline."""
+    key = key.strip().strip('"').strip("'")
+    key = key.replace("\\r\\n", "\\n").replace("\\n", "\n")
+    key = key.replace("\r\n", "\n").replace("\r", "\n")
+    if not key.endswith("\n"):
+        key += "\n"
+    return key
+
+
+def _load_creds_info():
+    """Return service-account credentials as a plain dict, regardless of whether
+    they were stored in Streamlit secrets as a native TOML table (recommended -
+    each field is its own key, so TOML/Streamlit handles the private key's
+    newlines correctly) or as one big JSON string (legacy/.env style, prone to
+    escaping bugs)."""
+    raw = None
+    try:
+        import streamlit as st
+        if "GOOGLE_CREDS_JSON" in st.secrets:
+            raw = st.secrets["GOOGLE_CREDS_JSON"]
+    except Exception:
+        pass
+
+    if raw is None:
+        raw = os.getenv("GOOGLE_CREDS_JSON")
+
+    if not raw:
+        return None
+
+    if isinstance(raw, str):
+        creds_info = json.loads(raw)
+    else:
+        # st.secrets returns a Mapping (AttrDict) when defined as a TOML table.
+        creds_info = dict(raw)
+
+    if "private_key" in creds_info:
+        creds_info["private_key"] = _normalize_private_key(creds_info["private_key"])
+
+    return creds_info
+
+
 def get_gsheet():
     global _client, _spreadsheet
     if _spreadsheet is not None:
         return _spreadsheet
-        
-    creds_json_str = None
-    # Try loading directly from Streamlit's native secrets manager to bypass env var bugs
-    try:
-        import streamlit as st
-        if "GOOGLE_CREDS_JSON" in st.secrets:
-            creds_json_str = st.secrets["GOOGLE_CREDS_JSON"]
-    except Exception:
-        pass
-        
-    if not creds_json_str:
-        creds_json_str = os.getenv("GOOGLE_CREDS_JSON")
-        
+
     creds_file = "google_creds.json"
-    
+
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
-    
+
     try:
-        if creds_json_str:
-            creds_info = json.loads(creds_json_str)
-            if "private_key" in creds_info:
-                # Replace escaped newlines with actual newline characters
-                creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n")
-            creds = Credentials.from_service_account_info(creds_info, scopes=scopes)
+        creds_info = _load_creds_info()
+        if creds_info:
+            try:
+                creds = Credentials.from_service_account_info(creds_info, scopes=scopes)
+            except ValueError as key_err:
+                pk = creds_info.get("private_key", "")
+                raise ValueError(
+                    "GOOGLE_CREDS_JSON has a malformed private_key (starts with "
+                    f"{pk[:27]!r}, {len(pk)} chars, ends with {pk[-27:]!r}). "
+                    "In Streamlit Cloud, store the service account credentials as a "
+                    "native TOML table instead of one JSON string, e.g.:\n"
+                    "[GOOGLE_CREDS_JSON]\n"
+                    'type = "service_account"\n'
+                    'private_key = """-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"""\n'
+                    "...\n"
+                    "This avoids the JSON/TOML double-escaping that corrupts the key."
+                ) from key_err
         elif os.path.exists(creds_file):
             creds = Credentials.from_service_account_file(creds_file, scopes=scopes)
         else:
             raise FileNotFoundError("Google credentials not found. Please provide 'google_creds.json' or set GOOGLE_CREDS_JSON env var.")
-            
+
         _client = gspread.authorize(creds)
         
         sheet_name = os.getenv("GOOGLE_SHEET_NAME", "Brand Tracker DB")
