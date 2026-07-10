@@ -10,16 +10,35 @@ import datetime
 import streamlit.components.v1 as components
 import io
 
-# Initialize database
-init_db()
+# Initialize database ONCE
+@st.cache_resource
+def run_db_init():
+    init_db()
+    return True
 
-# Start background scheduler
+run_db_init()
+
+# Start background scheduler ONCE
 @st.cache_resource
 def start_scheduler():
     init_scheduler()
     return True
 
 start_scheduler()
+
+# Cache Google Sheets API reads to prevent 429 Quota Exceeded errors
+@st.cache_data(ttl=15)
+def cached_get_all_companies():
+    return get_all_companies()
+
+@st.cache_data(ttl=15)
+def cached_get_recent_articles(limit):
+    return get_recent_articles(limit)
+
+@st.cache_data(ttl=15)
+def cached_get_last_fetch_time():
+    return get_last_fetch_time()
+
 
 # App layout
 st.set_page_config(page_title="Client News Tracker", layout="wide")
@@ -37,12 +56,14 @@ with st.sidebar:
         submit_btn = st.form_submit_button("Add")
         if submit_btn and new_company:
             if add_company(new_company.strip(), region):
+                st.cache_data.clear() # Clear cache on new write
                 st.success(f"Added {new_company} ({region})")
+                st.rerun()
             else:
                 st.error(f"{new_company} is already tracked.")
     
     # List and remove companies
-    companies = get_all_companies()
+    companies = cached_get_all_companies()
     if not companies:
         st.info("No companies tracked right now. Add some above.")
     else:
@@ -51,12 +72,13 @@ with st.sidebar:
                 st.write(f"**Status:** {comp.get('last_status', 'N/A')}")
                 if st.button("Remove", key=f"remove_{comp['id']}", type="secondary", use_container_width=True):
                     remove_company(comp['name'])
+                    st.cache_data.clear() # Clear cache on new write
                     st.rerun()
 
     # Fetch Status Timer
     st.markdown("---")
     st.subheader("Fetch Status")
-    last_fetch_str = get_last_fetch_time()
+    last_fetch_str = cached_get_last_fetch_time()
     
     if last_fetch_str:
         try:
@@ -128,6 +150,7 @@ with st.sidebar:
     if st.button("Fetch Now! (Manual Override)"):
         with st.spinner("Fetching latest news..."):
             new_arts = fetch_all_companies()
+            st.cache_data.clear() # Clear cache so new articles show immediately
             if new_arts:
                 send_notification(new_arts)
                 st.success(f"Found {len(new_arts)} new articles and updated sheet.")
@@ -139,8 +162,8 @@ with st.sidebar:
     st.markdown("---")
     st.subheader("📊 Download Compiled Report")
     
-    # Fetch all articles from sheet (max limit 5000)
-    all_articles = get_recent_articles(5000)
+    # Fetch all articles from sheet
+    all_articles = cached_get_recent_articles(5000)
     
     if all_articles:
         report_df = pd.DataFrame(all_articles)
@@ -170,7 +193,7 @@ st.header("Recent Articles")
 # Search Bar
 search_query = st.text_input("Looking for something specific?", placeholder="Type to search within Titles or Sources...")
 
-recent_articles = get_recent_articles(500)
+recent_articles = cached_get_recent_articles(500)
 
 if not recent_articles:
     st.info("No articles found yet. Please add a company and wait for the fetcher.")
