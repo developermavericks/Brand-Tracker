@@ -51,8 +51,20 @@ def fetch_rss_for_company(company_name: str, company_id: int, region: str = 'Glo
         link = getattr(entry, 'link', '')
         published_at = getattr(entry, 'published', 'Unknown Date')
         source = getattr(entry, 'source', {}).get('title', 'Google News')
+        summary = getattr(entry, 'summary', '')
         
-        # 1. Resolve redirect if it's a Google News link to get the original URL
+        # 1. Enforce strict keyword relevance for I/O Connect queries
+        comp_lower = company_name.lower()
+        if "i/o" in comp_lower or "io" in comp_lower or "connect" in comp_lower:
+            import re
+            text_to_check = (title + " " + summary).lower()
+            io_match = re.search(r'\b(i/o|io|i-o)\b', text_to_check)
+            connect_match = re.search(r'\b(connect|connected|connecting)\b', text_to_check)
+            if not (io_match and connect_match):
+                logger.info(f"Skipping irrelevant Google News result (failed I/O Connect check): {title}")
+                return None
+        
+        # 2. Resolve redirect if it's a Google News link to get the original URL
         final_url = link
         if link and "news.google.com" in link:
             try:
