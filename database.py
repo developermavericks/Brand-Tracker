@@ -10,13 +10,16 @@ load_dotenv()
 _client = None
 _spreadsheet = None
 
-def _normalize_private_key(key):
-    """Repair the ways a PEM private key gets mangled when it round-trips
+def _normalize_private_key(key: str) -> str:
+    """Standardize the private key format to match what cryptography expects
     through TOML/JSON/env-var storage: escaped newlines left un-decoded,
     stray CRLF, surrounding quotes/whitespace, or a missing trailing newline."""
     key = key.strip().strip('"').strip("'")
     key = key.replace("\\r\\n", "\\n").replace("\\n", "\n")
     key = key.replace("\r\n", "\n").replace("\r", "\n")
+    # Collapse double newlines which happen due to mixed physical/escaped line breaks
+    while "\n\n" in key:
+        key = key.replace("\n\n", "\n")
     if not key.endswith("\n"):
         key += "\n"
     return key
