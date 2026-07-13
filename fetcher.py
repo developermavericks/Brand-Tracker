@@ -56,39 +56,53 @@ def fetch_rss_for_company(company_name: str, company_id: int, region: str = 'Glo
         # 1. Enforce strict keyword relevance in the headline (title) only for I/O Connect queries
         comp_lower = company_name.lower()
         if "i/o" in comp_lower or "io" in comp_lower or "connect" in comp_lower:
+
             import re
             title_lower = title.lower()
             
-            # Determine requirements based on the tracked keyword
-            req_google = "google" in comp_lower
-            req_connect = "connect" in comp_lower
-            req_india = "india" in comp_lower
+            # 1. Check for any valid multi-word representation of the Google I/O or I/O Connect event in the headline
+            has_event_phrase = (
+                "google i/o" in title_lower or
+                "google io" in title_lower or
+                "google i-o" in title_lower or
+                "google i o" in title_lower or
+                "i/o connect" in title_lower or
+                "io connect" in title_lower or
+                "i-o connect" in title_lower or
+                "io-connect" in title_lower or
+                "i/o-connect" in title_lower or
+                "google connect" in title_lower or
+                "google connected" in title_lower
+            )
             
-            # 1. Match 'google'
-            has_google = re.search(r'\bgoogle\b', title_lower) is not None
+            # 2. Check for standalone 'io' / 'i/o' / 'i-o' / 'i o' in the headline (ignoring .io domains)
+            has_standalone_io = re.search(r'(?<!\.)\b(i/o|io|i-o|i\so)\b', title_lower) is not None
             
-            # 2. Match 'connect' (connect, connected, connecting)
-            has_connect = re.search(r'\b(connect|connected|connecting)\b', title_lower) is not None
+            # 3. If it is a standalone IO in the headline, confirm it is related to the Google event
+            # by checking the combined title + summary for Google-event-related terms.
+            is_confirmed_io_event = False
+            if has_standalone_io:
+                context_text = title_lower + " " + summary.lower()
+                is_confirmed_io_event = (
+                    "google" in context_text or
+                    "connect" in context_text or
+                    "android" in context_text or
+                    "developer" in context_text or
+                    "keynote" in context_text or
+                    "gemini" in context_text or
+                    "ai" in context_text or
+                    "tech" in context_text or
+                    "conference" in context_text or
+                    "event" in context_text
+                )
+
             
-            # 3. Match 'india'
-            has_india = re.search(r'\bindia\b', title_lower) is not None
-            
-            # 4. Match 'io' / 'i/o' / 'i-o' / 'i o' (whole word, NOT preceded by a dot to ignore .io domains)
-            has_io = re.search(r'(?<!\.)\b(i/o|io|i-o|i\so)\b', title_lower) is not None
-            
-            # Enforce the checks based on what was requested in the tracked keyword
-            if req_google and not has_google:
-                logger.info(f"Skipping irrelevant headline (missing 'google'): {title}")
+            # Match if we have the multi-word phrase OR a verified standalone IO event mention
+            if not (has_event_phrase or is_confirmed_io_event):
+                logger.info(f"Skipping irrelevant headline (no event context match): {title}")
                 return None
-            if req_connect and not has_connect:
-                logger.info(f"Skipping irrelevant headline (missing 'connect'): {title}")
-                return None
-            if req_india and not has_india:
-                logger.info(f"Skipping irrelevant headline (missing 'india'): {title}")
-                return None
-            if not has_io:
-                logger.info(f"Skipping irrelevant headline (missing 'io'): {title}")
-                return None
+
+
 
 
         
