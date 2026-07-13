@@ -64,19 +64,19 @@ def fetch_rss_for_company(company_name: str, company_id: int, region: str = 'Glo
             has_event_phrase = (
                 "google i/o" in title_lower or
                 "google io" in title_lower or
-                "google i-o" in title_lower or
+                
                 "google i o" in title_lower or
                 "i/o connect" in title_lower or
                 "io connect" in title_lower or
-                "i-o connect" in title_lower or
+                
                 "io-connect" in title_lower or
-                "i/o-connect" in title_lower or
+               
                 "google connect" in title_lower or
                 "google connected" in title_lower
             )
             
-            # 2. Check for standalone 'io' / 'i/o' / 'i-o' / 'i o' in the headline (ignoring .io domains)
-            has_standalone_io = re.search(r'(?<!\.)\b(i/o|io|i-o|i\so)\b', title_lower) is not None
+            # 2. Check for standalone 'io' / 'i/o' / 'i o' in the headline (ignoring .io domains)
+            has_standalone_io = re.search(r'(?<!\.)\b(i/o|io|i\so)\b', title_lower) is not None
             
             # 3. If it is a standalone IO in the headline, confirm it is related to the Google event
             # by checking the combined title + summary for Google-event-related terms.
