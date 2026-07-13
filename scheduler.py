@@ -9,12 +9,17 @@ from database import init_db, set_last_fetch_time
 def run_job():
     print("Running scheduled job: fetching tracking tasks...")
     init_db()
+    from database import is_paused
+    if is_paused():
+        print("Scheduler is paused. Skipping fetch.")
+        return
     new_articles = fetch_all_companies()
     if new_articles:
         print(f"Found {len(new_articles)} new articles. Sending notification.")
         send_notification(new_articles)
     else:
         print("No new articles found.")
+
 
 def init_scheduler():
     # Only run in main process (prevents duplicate jobs in certain WSGI environments)

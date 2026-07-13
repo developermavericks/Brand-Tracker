@@ -58,23 +58,38 @@ def fetch_rss_for_company(company_name: str, company_id: int, region: str = 'Glo
         if "i/o" in comp_lower or "io" in comp_lower or "connect" in comp_lower:
             import re
             title_lower = title.lower()
-            # Look for any mention of the event in the headline
-            has_event_mention = (
-                "google i/o" in title_lower or 
-                "google io" in title_lower or 
-                "google i-o" in title_lower or
-                "google i o" in title_lower or
-                "i/o connect" in title_lower or 
-                "io connect" in title_lower or 
-                "i-o connect" in title_lower or
-                "io-connect" in title_lower or
-                "i/o-connect" in title_lower or
-                # Or standalone word 'io' / 'i/o' / 'i-o' / 'i o'
-                re.search(r'\b(i/o|io|i-o|i\so)\b', title_lower) is not None
-            )
-            if not has_event_mention:
-                logger.info(f"Skipping irrelevant headline (no event mention): {title}")
+            
+            # Determine requirements based on the tracked keyword
+            req_google = "google" in comp_lower
+            req_connect = "connect" in comp_lower
+            req_india = "india" in comp_lower
+            
+            # 1. Match 'google'
+            has_google = re.search(r'\bgoogle\b', title_lower) is not None
+            
+            # 2. Match 'connect' (connect, connected, connecting)
+            has_connect = re.search(r'\b(connect|connected|connecting)\b', title_lower) is not None
+            
+            # 3. Match 'india'
+            has_india = re.search(r'\bindia\b', title_lower) is not None
+            
+            # 4. Match 'io' / 'i/o' / 'i-o' / 'i o' (whole word, NOT preceded by a dot to ignore .io domains)
+            has_io = re.search(r'(?<!\.)\b(i/o|io|i-o|i\so)\b', title_lower) is not None
+            
+            # Enforce the checks based on what was requested in the tracked keyword
+            if req_google and not has_google:
+                logger.info(f"Skipping irrelevant headline (missing 'google'): {title}")
                 return None
+            if req_connect and not has_connect:
+                logger.info(f"Skipping irrelevant headline (missing 'connect'): {title}")
+                return None
+            if req_india and not has_india:
+                logger.info(f"Skipping irrelevant headline (missing 'india'): {title}")
+                return None
+            if not has_io:
+                logger.info(f"Skipping irrelevant headline (missing 'io'): {title}")
+                return None
+
 
         
         # 2. Resolve redirect if it's a Google News link to get the original URL

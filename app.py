@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import warnings
 warnings.filterwarnings("ignore", category=SyntaxWarning)
-from database import init_db, add_company, remove_company, get_all_companies, get_recent_articles, get_last_fetch_time, set_last_fetch_time
+from database import init_db, add_company, remove_company, get_all_companies, get_recent_articles, get_last_fetch_time, set_last_fetch_time, is_paused, set_paused, delete_article
 from scheduler import init_scheduler
 from fetcher import fetch_all_companies
 from notifier import send_notification
@@ -39,6 +39,10 @@ def cached_get_recent_articles(limit):
 def cached_get_last_fetch_time():
     return get_last_fetch_time()
 
+@st.cache_data(ttl=15)
+def cached_is_paused():
+    return is_paused()
+
 
 # App layout
 st.set_page_config(page_title="Client News Tracker", layout="wide")
@@ -74,10 +78,31 @@ with st.sidebar:
                     remove_company(comp['name'])
                     st.cache_data.clear() # Clear cache on new write
                     st.rerun()
-
-    # Fetch Status Timer
     st.markdown("---")
     st.subheader("Fetch Status")
+    
+    # Pause/Resume Actions
+    is_p = cached_is_paused()
+    if is_p:
+        st.markdown(
+            """
+            <div style="background-color: #EF5350; color: #FFFFFF; font-weight: bold; padding: 10px; border-radius: 8px; text-align: center; margin-bottom: 10px;">
+                ⏸️ SCRAPER IS PAUSED
+            </div>
+            """, 
+            unsafe_allow_html=True
+        )
+        if st.button("▶️ Resume Scraper", type="primary", use_container_width=True):
+            set_paused(False)
+            st.cache_data.clear()
+            st.rerun()
+    else:
+        if st.button("⏸️ Pause Scraper", type="secondary", use_container_width=True):
+            set_paused(True)
+            st.cache_data.clear()
+            st.rerun()
+
+    st.markdown(" ")
     last_fetch_str = cached_get_last_fetch_time()
     
     if last_fetch_str:
@@ -94,52 +119,62 @@ with st.sidebar:
             next_fetch_utc = last_fetch_dt + datetime.timedelta(minutes=5)
             
             st.write(f"**Last Check (IST):** {last_fetch_ist.strftime('%H:%M:%S')}")
-            st.write(f"**Next Check (IST):** {next_fetch_ist.strftime('%H:%M:%S')}")
             
-            # Classy JS Countdown Widget
-            timer_html = f"""
-            <div style="font-family: 'Inter', sans-serif; background: #1E1E1E; color: #FFFFFF; padding: 15px; border-radius: 8px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                <div style="font-size: 11px; font-weight: 500; color: #AAAAAA; margin-bottom: 5px; text-transform: uppercase; letter-spacing: 1px;">Time Until Next Fetch</div>
-                <div id="countdown" style="font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; color: #00E676; text-shadow: 0 0 10px rgba(0,230,118,0.3);">--:--</div>
-            </div>
-            <script>
-                var nextFetch = new Date('{next_fetch_utc.isoformat()}').getTime();
-                var countdownEl = document.getElementById("countdown");
+            if is_p:
+                timer_html = """
+                <div style="font-family: 'Inter', sans-serif; background: #1E1E1E; color: #FFFFFF; padding: 15px; border-radius: 8px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                    <div style="font-size: 11px; font-weight: 500; color: #AAAAAA; margin-bottom: 5px; text-transform: uppercase; letter-spacing: 1px;">Time Until Next Fetch</div>
+                    <div id="countdown" style="font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; color: #EF5350; text-shadow: 0 0 10px rgba(239,83,80,0.3);">PAUSED</div>
+                </div>
+                """
+                components.html(timer_html, height=130)
+            else:
+                st.write(f"**Next Check (IST):** {next_fetch_ist.strftime('%H:%M:%S')}")
                 
-                var x = setInterval(function() {{
-                    var now = new Date().getTime();
-                    var distance = nextFetch - now;
+                # Classy JS Countdown Widget
+                timer_html = f"""
+                <div style="font-family: 'Inter', sans-serif; background: #1E1E1E; color: #FFFFFF; padding: 15px; border-radius: 8px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                    <div style="font-size: 11px; font-weight: 500; color: #AAAAAA; margin-bottom: 5px; text-transform: uppercase; letter-spacing: 1px;">Time Until Next Fetch</div>
+                    <div id="countdown" style="font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; color: #00E676; text-shadow: 0 0 10px rgba(0,230,118,0.3);">--:--</div>
+                </div>
+                <script>
+                    var nextFetch = new Date('{next_fetch_utc.isoformat()}').getTime();
+                    var countdownEl = document.getElementById("countdown");
                     
-                    if (distance < 0) {{
-                        clearInterval(x);
-                        countdownEl.innerHTML = "WAITING...";
-                        countdownEl.style.color = "#FFCA28";
+                    var x = setInterval(function() {{
+                        var now = new Date().getTime();
+                        var distance = nextFetch - now;
                         
-                        if (sessionStorage.getItem('last_timer_reload') !== nextFetch.toString()) {{
-                            sessionStorage.setItem('last_timer_reload', nextFetch.toString());
-                            setTimeout(function() {{ 
-                                try {{ window.location.reload(); }} catch(e) {{}}
-                                try {{ window.parent.location.reload(); }} catch(e) {{}}
-                            }}, 5000);
-                        }}
-                    }} else {{
-                        var minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
-                        var seconds = Math.floor((distance % (1000 * 60)) / 1000);
-                        
-                        var minStr = minutes < 10 ? "0" + minutes : minutes;
-                        var secStr = seconds < 10 ? "0" + seconds : seconds;
-                        
-                        countdownEl.innerHTML = minStr + ":" + secStr;
-                        if (minutes < 1) {{
+                        if (distance < 0) {{
+                            clearInterval(x);
+                            countdownEl.innerHTML = "WAITING...";
                             countdownEl.style.color = "#FFCA28";
-                            countdownEl.style.textShadow = "0 0 10px rgba(255,202,40,0.3)";
+                            
+                            if (sessionStorage.getItem('last_timer_reload') !== nextFetch.toString()) {{
+                                sessionStorage.setItem('last_timer_reload', nextFetch.toString());
+                                setTimeout(function() {{ 
+                                    try {{ window.location.reload(); }} catch(e) {{}}
+                                    try {{ window.parent.location.reload(); }} catch(e) {{}}
+                                 }}, 5000);
+                            }}
+                        }} else {{
+                            var minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+                            var seconds = Math.floor((distance % (1000 * 60)) / 1000);
+                            
+                            var minStr = minutes < 10 ? "0" + minutes : minutes;
+                            var secStr = seconds < 10 ? "0" + seconds : seconds;
+                            
+                            countdownEl.innerHTML = minStr + ":" + secStr;
+                            if (minutes < 1) {{
+                                countdownEl.style.color = "#FFCA28";
+                                countdownEl.style.textShadow = "0 0 10px rgba(255,202,40,0.3)";
+                            }}
                         }}
-                    }}
-                }}, 1000);
-            </script>
-            """
-            components.html(timer_html, height=130)
-            
+                    }}, 1000);
+                </script>
+                """
+                components.html(timer_html, height=130)
+                
         except Exception:
             st.write("Wait for first fetch...")
     else:
@@ -147,6 +182,8 @@ with st.sidebar:
 
     # Manual Fetch Action
     st.markdown("---")
+    if is_p:
+        st.caption("⚠️ Resume the scraper to enable background checks.")
     if st.button("Fetch Now! (Manual Override)"):
         with st.spinner("Fetching latest news..."):
             new_arts = fetch_all_companies()
@@ -157,6 +194,7 @@ with st.sidebar:
             else:
                 st.info("No new articles found.")
             st.rerun()
+
 
     # Brand Report Download Section (Consolidated Excel Sheet)
     st.markdown("---")
@@ -232,19 +270,31 @@ else:
             axis=1, result_type='expand'
         )
 
-        # Render clean feed cards
-        for _, row in df.iterrows():
-            st.markdown(
-                f"""
-                <div style="background-color: #1E293B; padding: 15px; border-radius: 8px; margin-bottom: 10px; border-left: 5px solid #3B82F6;">
-                    <div style="font-size: 16px; font-weight: bold; line-height: 1.4;">
-                        <a href="{row['link']}" target="_blank" style="text-decoration: none; color: #60A5FA;">{row['title']}</a>
+        # Render clean feed cards with a delete button
+        for idx, row in df.iterrows():
+            col_card, col_del = st.columns([0.94, 0.06], vertical_alignment="center")
+            with col_card:
+                st.markdown(
+                    f"""
+                    <div style="background-color: #1E293B; padding: 15px; border-radius: 8px; border-left: 5px solid #3B82F6;">
+                        <div style="font-size: 16px; font-weight: bold; line-height: 1.4;">
+                            <a href="{row['link']}" target="_blank" style="text-decoration: none; color: #60A5FA;">{row['title']}</a>
+                        </div>
+                        <div style="font-size: 13px; color: #94A3B8; margin-top: 6px;">
+                            <span>📰 {row['source']}</span> &nbsp;|&nbsp; 
+                            <span>⏰ {row['Time (IST)']} ({row['Relative Time']})</span>
+                        </div>
                     </div>
-                    <div style="font-size: 13px; color: #94A3B8; margin-top: 6px;">
-                        <span>📰 {row['source']}</span> &nbsp;|&nbsp; 
-                        <span>⏰ {row['Time (IST)']} ({row['Relative Time']})</span>
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
+                    """,
+                    unsafe_allow_html=True
+                )
+            with col_del:
+                if st.button("🗑️", key=f"del_{idx}_{row['title'][:20]}", help="Delete this article permanently from spreadsheet"):
+                    with st.spinner("Deleting..."):
+                        if delete_article(row['title']):
+                            st.cache_data.clear()
+                            st.toast("Article deleted successfully!", icon="🗑️")
+                            st.rerun()
+                        else:
+                            st.error("Failed to delete.")
+

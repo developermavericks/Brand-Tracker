@@ -336,6 +336,60 @@ def get_last_fetch_time():
         print(f"Error getting last fetch time: {e}")
         return None
 
+def is_paused() -> bool:
+    try:
+        sh = get_gsheet()
+        w = sh.worksheet("Status")
+        rows = w.get_all_values()
+        
+        for row in rows[1:]:
+            if len(row) > 1 and row[0] == "is_paused":
+                return row[1].strip().lower() == "true"
+        return False
+    except Exception as e:
+        print(f"Error checking pause status: {e}")
+        return False
+
+def set_paused(paused: bool):
+    try:
+        sh = get_gsheet()
+        w = sh.worksheet("Status")
+        rows = w.get_all_values()
+        
+        val_str = "true" if paused else "false"
+        found = False
+        for idx, row in enumerate(rows):
+            if idx > 0 and len(row) > 0 and row[0] == "is_paused":
+                w.update_cell(idx + 1, 2, val_str)
+                found = True
+                break
+                
+        if not found:
+            w.append_row(["is_paused", val_str])
+    except Exception as e:
+        print(f"Error setting pause status: {e}")
+
+def delete_article(title: str) -> bool:
+    try:
+        sh = get_gsheet()
+        w = sh.worksheet("Articles")
+        rows = w.get_all_values()
+        
+        row_idx_to_delete = -1
+        for idx, row in enumerate(rows):
+            if idx > 0 and len(row) > 0 and row[0].strip().lower() == title.strip().lower():
+                row_idx_to_delete = idx + 1
+                break
+                
+        if row_idx_to_delete != -1:
+            w.delete_rows(row_idx_to_delete)
+            return True
+        return False
+    except Exception as e:
+        print(f"Error deleting article: {e}")
+        return False
+
 if __name__ == "__main__":
     init_db()
     print("Database initialized.")
+
