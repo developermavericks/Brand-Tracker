@@ -75,26 +75,39 @@ def fetch_rss_for_company(company_name: str, company_id: int, region: str = 'Glo
                 "google connected" in title_lower
             )
             
-            # 2. Check for standalone 'io' / 'i/o' / 'i o' in the headline (ignoring .io domains)
-            has_standalone_io = re.search(r'(?<!\.)\b(i/o|io|i\so)\b', title_lower) is not None
+            # 2. Check for standalone 'io' / 'i/o' / 'i-o' / 'i o' in the headline (ignoring .io domains)
+            has_standalone_io = re.search(r'(?<!\.)\b(i/o|io|i-o|i\so)\b', title_lower) is not None
             
             # 3. If it is a standalone IO in the headline, confirm it is related to the Google event
             # by checking the combined title + summary for Google-event-related terms.
             is_confirmed_io_event = False
             if has_standalone_io:
                 context_text = title_lower + " " + summary.lower()
-                is_confirmed_io_event = (
+                
+                # Ensure presence of Google event/ecosystem keywords
+                has_google_context = (
                     "google" in context_text or
-                    "connect" in context_text or
                     "android" in context_text or
                     "developer" in context_text or
                     "keynote" in context_text or
                     "gemini" in context_text or
-                    "ai" in context_text or
-                    "tech" in context_text or
-                    "conference" in context_text or
-                    "event" in context_text
+                    "pixel" in context_text or
+                    "sundar pichai" in context_text or
+                    "firebase" in context_text or
+                    "flutter" in context_text
                 )
+                
+                # Avoid false positives from disk I/O, medical I/O, or finance I/O
+                exclusions = [
+                    "disk", "drive", "read/write", "throughput", "latency", "ssd", "storage",
+                    "controller", "multiplexing", "memory", "cpu", "ports", "virtualization",
+                    "mortgage", "interest only", "finance", "intraosseous", "pressure",
+                    "infusion", "clinical", "socket.io", "itch.io", "drizzle.io"
+                ]
+                has_exclusion = any(word in context_text for word in exclusions)
+                
+                if has_google_context and not has_exclusion:
+                    is_confirmed_io_event = True
 
             
             # Match if we have the multi-word phrase OR a verified standalone IO event mention
