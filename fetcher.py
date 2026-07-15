@@ -84,19 +84,6 @@ def fetch_rss_for_company(company_name: str, company_id: int, region: str = 'Glo
             if has_standalone_io:
                 context_text = title_lower + " " + summary.lower()
                 
-                # Ensure presence of Google event/ecosystem keywords
-                has_google_context = (
-                    "google" in context_text or
-                    "android" in context_text or
-                    "developer" in context_text or
-                    "keynote" in context_text or
-                    "gemini" in context_text or
-                    "pixel" in context_text or
-                    "sundar pichai" in context_text or
-                    "firebase" in context_text or
-                    "flutter" in context_text
-                )
-                
                 # Avoid false positives from disk I/O, medical I/O, or finance I/O
                 exclusions = [
                     "disk", "drive", "read/write", "throughput", "latency", "ssd", "storage",
@@ -106,8 +93,26 @@ def fetch_rss_for_company(company_name: str, company_id: int, region: str = 'Glo
                 ]
                 has_exclusion = any(word in context_text for word in exclusions)
                 
-                if has_google_context and not has_exclusion:
-                    is_confirmed_io_event = True
+                if not has_exclusion:
+                    # If written explicitly as "i/o" (with a slash), it is highly likely the Google event
+                    is_written_as_slash_io = re.search(r'(?<!\.)\bi/o\b', title_lower) is not None
+                    if is_written_as_slash_io:
+                        is_confirmed_io_event = True
+                    else:
+                        # If written without a slash ("io", "i-o", "i o"), strictly require Google context
+                        has_google_context = (
+                            "google" in context_text or
+                            "android" in context_text or
+                            "developer" in context_text or
+                            "keynote" in context_text or
+                            "gemini" in context_text or
+                            "pixel" in context_text or
+                            "sundar pichai" in context_text or
+                            "firebase" in context_text or
+                            "flutter" in context_text
+                        )
+                        if has_google_context:
+                            is_confirmed_io_event = True
 
             
             # Match if we have the multi-word phrase OR a verified standalone IO event mention
