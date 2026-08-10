@@ -26,14 +26,17 @@ def start_scheduler():
 
 start_scheduler()
 
+# Read user_email from query parameters for session-based personalization
+user_email = st.query_params.get("user_email", "").strip().lower()
+
 # Cache Google Sheets API reads to prevent 429 Quota Exceeded errors
 @st.cache_data(ttl=15)
-def cached_get_all_companies():
-    return get_all_companies()
+def cached_get_all_companies(email=None):
+    return get_all_companies(email)
 
 @st.cache_data(ttl=15)
-def cached_get_recent_articles(limit):
-    return get_recent_articles(limit)
+def cached_get_recent_articles(limit, email=None):
+    return get_recent_articles(limit, email)
 
 @st.cache_data(ttl=15)
 def cached_get_last_fetch_time():
@@ -52,6 +55,10 @@ st.markdown("Automatically track Google News RSS feeds for specific companies. U
 # Sidebar for managing companies
 with st.sidebar:
     st.header("Tracked Companies")
+    if user_email:
+        st.caption(f"👤 Connected Session: **{user_email}**")
+    else:
+        st.caption("👤 Connected Session: **Anonymous / Direct**")
     
     # Add company form
     with st.form("add_company_form", clear_on_submit=True):
@@ -59,7 +66,7 @@ with st.sidebar:
         region = st.selectbox("Region", ["Global", "India", "Both"])
         submit_btn = st.form_submit_button("Add")
         if submit_btn and new_company:
-            if add_company(new_company.strip(), region):
+            if add_company(new_company.strip(), region, user_email):
                 st.cache_data.clear() # Clear cache on new write
                 st.success(f"Added {new_company} ({region})")
                 st.rerun()
@@ -67,7 +74,7 @@ with st.sidebar:
                 st.error(f"{new_company} is already tracked.")
     
     # List and remove companies
-    companies = cached_get_all_companies()
+    companies = cached_get_all_companies(user_email)
     if not companies:
         st.info("No companies tracked right now. Add some above.")
     else:
@@ -75,7 +82,7 @@ with st.sidebar:
             with st.expander(f"🏢 {comp['name']} ({comp.get('region', 'Global')})"):
                 st.write(f"**Status:** {comp.get('last_status', 'N/A')}")
                 if st.button("Remove", key=f"remove_{comp['id']}", type="secondary", use_container_width=True):
-                    remove_company(comp['name'])
+                    remove_company(comp['name'], user_email)
                     st.cache_data.clear() # Clear cache on new write
                     st.rerun()
     st.markdown("---")
@@ -181,19 +188,20 @@ with st.sidebar:
         st.write("Fetching soon...")
 
     # Manual Fetch Action
-    st.markdown("---")
     if is_p:
         st.caption("⚠️ Resume the scraper to enable background checks.")
-    if st.button("Fetch Now! (Manual Override)"):
-        with st.spinner("Fetching latest news..."):
-            new_arts = fetch_all_companies()
-            st.cache_data.clear() # Clear cache so new articles show immediately
-            if new_arts:
-                send_notification(new_arts)
-                st.success(f"Found {len(new_arts)} new articles and updated sheet.")
-            else:
-                st.info("No new articles found.")
-            st.rerun()
+        st.button("Fetch Now! (Scraper Paused)", disabled=True, use_container_width=True)
+    else:
+        if st.button("Fetch Now! (Manual Override)", use_container_width=True):
+            with st.spinner("Fetching latest news..."):
+                new_arts = fetch_all_companies()
+                st.cache_data.clear() # Clear cache so new articles show immediately
+                if new_arts:
+                    send_notification(new_arts)
+                    st.success(f"Found {len(new_arts)} new articles and updated sheet.")
+                else:
+                    st.info("No new articles found.")
+                st.rerun()
 
 
     # Brand Report Download Section (Consolidated Excel Sheet)
@@ -201,7 +209,14 @@ with st.sidebar:
     st.subheader("📊 Download Compiled Report")
     
     # Fetch all articles from sheet
-    all_articles = cached_get_recent_articles(5000)
+    all_articles = cached_get_recent_articles(5000, user_email)
+    company_names = [comp['name'].lower() for comp in companies]
+    
+    if user_email and company_names:
+        all_articles = [
+            art for art in all_articles
+            if any(name in art['title'].lower() or name in art['source'].lower() for name in company_names)
+        ]
     
     if all_articles:
         report_df = pd.DataFrame(all_articles)
@@ -231,9 +246,11 @@ st.header("Recent Articles")
 # Search Bar
 search_query = st.text_input("Looking for something specific?", placeholder="Type to search within Titles or Sources...")
 
-recent_articles = cached_get_recent_articles(500)
+recent_articles = cached_get_recent_articles(500, user_email)
 
-if not recent_articles:
+if not companies:
+    st.info("Please add a company in the sidebar to start tracking news.")
+elif not recent_articles:
     st.info("No articles found yet. Please add a company and wait for the fetcher.")
 else:
     df = pd.DataFrame(recent_articles)
@@ -270,31 +287,36 @@ else:
             axis=1, result_type='expand'
         )
 
-        # Render clean feed cards with a delete button
-        for idx, row in df.iterrows():
-            col_card, col_del = st.columns([0.94, 0.06], vertical_alignment="center")
-            with col_card:
-                st.markdown(
-                    f"""
-                    <div style="background-color: #1E293B; padding: 15px; border-radius: 8px; border-left: 5px solid #3B82F6;">
-                        <div style="font-size: 16px; font-weight: bold; line-height: 1.4;">
-                            <a href="{row['link']}" target="_blank" style="text-decoration: none; color: #60A5FA;">{row['title']}</a>
-                        </div>
-                        <div style="font-size: 13px; color: #94A3B8; margin-top: 6px;">
-                            <span>📰 {row['source']}</span> &nbsp;|&nbsp; 
-                            <span>⏰ {row['Time (IST)']} ({row['Relative Time']})</span>
-                        </div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
-            with col_del:
-                if st.button("🗑️", key=f"del_{idx}_{row['title'][:20]}", help="Delete this article permanently from spreadsheet"):
-                    with st.spinner("Deleting..."):
-                        if delete_article(row['title']):
-                            st.cache_data.clear()
-                            st.toast("Article deleted successfully!", icon="🗑️")
-                            st.rerun()
-                        else:
-                            st.error("Failed to delete.")
+        # Render clean feed cards grouped by company
+        for comp in companies:
+            comp_name = comp['name']
+            comp_df = df[df['company_name'].str.lower() == comp_name.lower()]
+            if not comp_df.empty:
+                st.subheader(f"🏢 {comp_name}")
+                for idx, row in comp_df.iterrows():
+                    col_card, col_del = st.columns([0.94, 0.06], vertical_alignment="center")
+                    with col_card:
+                        st.markdown(
+                            f"""
+                            <div style="background-color: #1E293B; padding: 15px; border-radius: 8px; border-left: 5px solid #3B82F6;">
+                                <div style="font-size: 16px; font-weight: bold; line-height: 1.4;">
+                                    <a href="{row['link']}" target="_blank" style="text-decoration: none; color: #60A5FA;">{row['title']}</a>
+                                </div>
+                                <div style="font-size: 13px; color: #94A3B8; margin-top: 6px;">
+                                    <span>📰 {row['source']}</span> &nbsp;|&nbsp; 
+                                    <span>⏰ {row['Time (IST)']} ({row['Relative Time']})</span>
+                                </div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
+                    with col_del:
+                        if st.button("🗑️", key=f"del_{idx}_{row['title'][:20]}", help="Delete this article permanently from spreadsheet"):
+                            with st.spinner("Deleting..."):
+                                if delete_article(row['title'], user_email):
+                                    st.cache_data.clear()
+                                    st.toast("Article deleted successfully!", icon="🗑️")
+                                    st.rerun()
+                                else:
+                                    st.error("Failed to delete.")
 

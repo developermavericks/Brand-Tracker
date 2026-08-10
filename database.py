@@ -110,22 +110,28 @@ def init_db():
     
     # 1. Verify/Create 'Companies' worksheet
     try:
-        sh.worksheet("Companies")
+        w_comp = sh.worksheet("Companies")
+        # Upgrade for user-scoped sessions: resize to 5 columns if it's 4
+        if w_comp.col_count < 5:
+            w_comp.resize(rows=w_comp.row_count, cols=5)
+            w_comp.update_cell(1, 5, "user_email")
+            print("Upgraded Companies worksheet with user_email column.")
     except gspread.exceptions.WorksheetNotFound:
-        sh.add_worksheet(title="Companies", rows="100", cols="4")
+        sh.add_worksheet(title="Companies", rows="100", cols="5")
         w = sh.worksheet("Companies")
-        w.append_row(["id", "name", "region", "last_status"])
+        w.append_row(["id", "name", "region", "last_status", "user_email"])
         
-    # 2. Verify/Create 'Articles' worksheet (Only 4 core columns now)
+    # 2. Verify/Create 'Articles' worksheet (Support 5 columns for user-scoping)
     try:
         w_art = sh.worksheet("Articles")
-        if w_art.col_count > 4:
-            w_art.resize(rows=w_art.row_count, cols=4)
-            print("Resized Articles worksheet to 4 columns.")
+        if w_art.col_count < 5:
+            w_art.resize(rows=w_art.row_count, cols=5)
+            w_art.update_cell(1, 5, "user_email")
+            print("Upgraded Articles worksheet with user_email column.")
     except gspread.exceptions.WorksheetNotFound:
-        sh.add_worksheet(title="Articles", rows="2000", cols="4")
+        sh.add_worksheet(title="Articles", rows="2000", cols="5")
         w = sh.worksheet("Articles")
-        w.append_row(["title", "link", "published_at", "source"])
+        w.append_row(["title", "link", "published_at", "source", "user_email"])
 
         
     # 3. Verify/Create 'Status' worksheet
@@ -138,7 +144,7 @@ def init_db():
 
     print("Google Sheets database initialized successfully.")
 
-def get_all_companies():
+def get_all_companies(user_email: str = None):
     try:
         sh = get_gsheet()
         w = sh.worksheet("Companies")
@@ -153,18 +159,26 @@ def get_all_companies():
                 comp_name = row[1]
                 region = row[2]
                 last_status = row[3] if len(row) > 3 else "Pending first fetch"
+                row_email = row[4].strip() if len(row) > 4 else ""
+                
+                # Filter by user_email if provided
+                if user_email:
+                    if row_email.lower() != user_email.lower():
+                        continue
+                
                 companies.append({
                     "id": comp_id,
                     "name": comp_name,
                     "region": region,
-                    "last_status": last_status
+                    "last_status": last_status,
+                    "user_email": row_email
                 })
         return sorted(companies, key=lambda x: x["name"])
     except Exception as e:
         print(f"Error fetching companies: {e}")
         return []
 
-def add_company(name: str, region: str = 'Global'):
+def add_company(name: str, region: str = 'Global', user_email: str = ''):
     try:
         sh = get_gsheet()
         w = sh.worksheet("Companies")
@@ -172,7 +186,9 @@ def add_company(name: str, region: str = 'Global'):
         
         for row in rows[1:]:
             if len(row) > 1 and row[1].strip().lower() == name.strip().lower():
-                return False
+                row_email = row[4].strip() if len(row) > 4 else ""
+                if row_email.lower() == user_email.lower():
+                    return False
                 
         max_id = 0
         for row in rows[1:]:
@@ -180,13 +196,13 @@ def add_company(name: str, region: str = 'Global'):
                 max_id = max(max_id, int(row[0]))
         new_id = max_id + 1
         
-        w.append_row([new_id, name.strip(), region, "Pending first fetch"])
+        w.append_row([new_id, name.strip(), region, "Pending first fetch", user_email])
         return True
     except Exception as e:
         print(f"Error adding company: {e}")
         return False
 
-def remove_company(name: str):
+def remove_company(name: str, user_email: str = ''):
     try:
         sh = get_gsheet()
         w_comp = sh.worksheet("Companies")
@@ -195,8 +211,10 @@ def remove_company(name: str):
         row_idx_to_delete = -1
         for idx, row in enumerate(rows_comp):
             if idx > 0 and len(row) > 1 and row[1].strip().lower() == name.strip().lower():
-                row_idx_to_delete = idx + 1
-                break
+                row_email = row[4].strip() if len(row) > 4 else ""
+                if row_email.lower() == user_email.lower():
+                    row_idx_to_delete = idx + 1
+                    break
                 
         if row_idx_to_delete != -1:
             w_comp.delete_rows(row_idx_to_delete)
@@ -221,13 +239,24 @@ def update_company_status(company_id: int, status: str):
     except Exception as e:
         print(f"Error updating company status: {e}")
 
-def add_article(company_id: int, title: str, link: str, published_at: str, source: str, summary: str = None, sentiment: str = None, extraction_method: str = 'summary'):
+def get_user_articles_sheet(user_email: str = None):
+    sh = get_gsheet()
+    sheet_name = user_email.strip() if user_email and user_email.strip() else "Articles"
     try:
-        sh = get_gsheet()
-        w_art = sh.worksheet("Articles")
+        w = sh.worksheet(sheet_name)
+    except gspread.exceptions.WorksheetNotFound:
+        # Create a new sheet for the specific user
+        sh.add_worksheet(title=sheet_name, rows="2000", cols="5")
+        w = sh.worksheet(sheet_name)
+        w.append_row(["title", "link", "published_at", "source", "company_name"])
+    return w
+
+def add_article(company_id: int, title: str, link: str, published_at: str, source: str, summary: str = None, sentiment: str = None, extraction_method: str = 'summary', user_email: str = '', company_name: str = 'Event Feed'):
+    try:
+        w_art = get_user_articles_sheet(user_email)
         rows = w_art.get_all_values()
         
-        # Check for duplicate links or titles globally (Column 1 is title, Column 2 is link)
+        # Check for duplicate links or titles inside the user's sheet (Column 1 is title, Column 2 is link)
         norm_link = link.strip().lower()
         norm_title = title.strip().lower()
         
@@ -235,7 +264,6 @@ def add_article(company_id: int, title: str, link: str, published_at: str, sourc
             if len(row) > 1:
                 db_title = row[0].strip().lower()
                 db_link = row[1].strip().lower()
-                # If either the link or title matches, it is a duplicate
                 if db_link == norm_link or db_title == norm_title:
                     return False
                 
@@ -243,18 +271,18 @@ def add_article(company_id: int, title: str, link: str, published_at: str, sourc
             title,
             link,
             published_at,
-            source
+            source,
+            company_name
         ])
         return True
     except Exception as e:
-        print(f"Error adding article: {e}")
+        print(f"Error adding article to user sheet: {e}")
         return False
 
 
-def get_recent_articles(limit=50):
+def get_recent_articles(limit=50, user_email: str = None):
     try:
-        sh = get_gsheet()
-        w = sh.worksheet("Articles")
+        w = get_user_articles_sheet(user_email)
         rows = w.get_all_values()
         if len(rows) <= 1:
             return []
@@ -264,12 +292,14 @@ def get_recent_articles(limit=50):
             if len(row) < 4:
                 row = row + [""] * (4 - len(row))
             
+            comp_name = row[4].strip() if len(row) > 4 else "Event Feed"
+
             articles.append({
                 "title": row[0],
                 "link": row[1],
                 "published_at": row[2],
                 "source": row[3],
-                "company_name": "Event Feed" # Unified fallback name
+                "company_name": comp_name
             })
             if len(articles) >= limit:
                 break
@@ -278,11 +308,9 @@ def get_recent_articles(limit=50):
         print(f"Error getting recent articles: {e}")
         return []
 
-def get_articles_for_brand(company_name):
-    # Since we store all articles together now, we return all articles
+def get_articles_for_brand(company_name, user_email: str = None):
     try:
-        sh = get_gsheet()
-        w = sh.worksheet("Articles")
+        w = get_user_articles_sheet(user_email)
         rows = w.get_all_values()
         if len(rows) <= 1:
             return []
@@ -292,12 +320,16 @@ def get_articles_for_brand(company_name):
             if len(row) < 4:
                 row = row + [""] * (4 - len(row))
                 
+            comp_name = row[4].strip() if len(row) > 4 else "Event Feed"
+            if company_name and comp_name.lower() != company_name.lower():
+                continue
+
             articles.append({
                 "title": row[0],
                 "link": row[1],
                 "published_at": row[2],
                 "source": row[3],
-                "company_name": "Event Feed"
+                "company_name": comp_name
             })
         return articles
     except Exception as e:
@@ -369,7 +401,7 @@ def set_paused(paused: bool):
     except Exception as e:
         print(f"Error setting pause status: {e}")
 
-def delete_article(title: str) -> bool:
+def delete_article(title: str, user_email: str = '') -> bool:
     try:
         sh = get_gsheet()
         w = sh.worksheet("Articles")
@@ -378,8 +410,10 @@ def delete_article(title: str) -> bool:
         row_idx_to_delete = -1
         for idx, row in enumerate(rows):
             if idx > 0 and len(row) > 0 and row[0].strip().lower() == title.strip().lower():
-                row_idx_to_delete = idx + 1
-                break
+                row_email = row[4].strip() if len(row) > 4 else ""
+                if row_email.lower() == user_email.lower():
+                    row_idx_to_delete = idx + 1
+                    break
                 
         if row_idx_to_delete != -1:
             w.delete_rows(row_idx_to_delete)

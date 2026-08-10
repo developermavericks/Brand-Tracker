@@ -28,7 +28,7 @@ def is_within_24_hours(published_at: str) -> bool:
     except Exception:
         return False
 
-def fetch_rss_for_company(company_name: str, company_id: int, region: str = 'Global', sync_time=None):
+def fetch_rss_for_company(company_name: str, company_id: int, region: str = 'Global', sync_time=None, user_email: str = ''):
     regions_to_fetch = []
     if region == 'Both':
         regions_to_fetch = ['Global', 'India']
@@ -139,7 +139,9 @@ def fetch_rss_for_company(company_name: str, company_id: int, region: str = 'Glo
                 title=title,
                 link=final_url,
                 published_at=published_at,
-                source=source
+                source=source,
+                user_email=user_email,
+                company_name=company_name
             )
             if is_new:
                 logger.info(f"New article found & saved: {title}")
@@ -190,6 +192,11 @@ def fetch_rss_for_company(company_name: str, company_id: int, region: str = 'Glo
     return all_new_articles
 
 def fetch_all_companies():
+    from database import is_paused
+    if is_paused():
+        logger.info("Scraper is paused. Skipping fetch_all_companies.")
+        return []
+        
     companies = get_all_companies()
     all_new_articles = []
     
@@ -198,7 +205,7 @@ def fetch_all_companies():
     set_last_fetch_time(session_start_utc.isoformat())
 
     def fetch_comp(comp):
-        return fetch_rss_for_company(comp['name'], comp['id'], comp.get('region', 'Global'), sync_time=session_start_utc)
+        return fetch_rss_for_company(comp['name'], comp['id'], comp.get('region', 'Global'), sync_time=session_start_utc, user_email=comp.get('user_email', ''))
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = list(executor.map(fetch_comp, companies))
