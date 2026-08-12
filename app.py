@@ -287,36 +287,47 @@ else:
             axis=1, result_type='expand'
         )
 
-        # Render clean feed cards grouped by company
-        for comp in companies:
+        # Render clean feed cards segregated keyword-wise via Streamlit Tabs
+        tab_names = [f"🏢 {comp['name']}" for comp in companies]
+        tabs = st.tabs(tab_names)
+        
+        for i, comp in enumerate(companies):
             comp_name = comp['name']
-            comp_df = df[df['company_name'].str.lower() == comp_name.lower()]
-            if not comp_df.empty:
-                st.subheader(f"🏢 {comp_name}")
-                for idx, row in comp_df.iterrows():
-                    col_card, col_del = st.columns([0.94, 0.06], vertical_alignment="center")
-                    with col_card:
-                        st.markdown(
-                            f"""
-                            <div style="background-color: #1E293B; padding: 15px; border-radius: 8px; border-left: 5px solid #3B82F6;">
-                                <div style="font-size: 16px; font-weight: bold; line-height: 1.4;">
-                                    <a href="{row['link']}" target="_blank" style="text-decoration: none; color: #60A5FA;">{row['title']}</a>
+            with tabs[i]:
+                # Segregate matching: exact sheet company name OR keyword mention in the headline/title
+                comp_df = df[
+                    (df['company_name'].str.lower() == comp_name.lower()) |
+                    (df['title'].str.lower().str.contains(comp_name.lower(), na=False))
+                ]
+                
+                if comp_df.empty:
+                    st.info(f"No recent articles found for keyword: **{comp_name}**")
+                else:
+                    for idx, row in comp_df.iterrows():
+                        col_card, col_del = st.columns([0.94, 0.06], vertical_alignment="center")
+                        with col_card:
+                            st.markdown(
+                                f"""
+                                <div style="background-color: #1E293B; padding: 15px; border-radius: 8px; border-left: 5px solid #3B82F6;">
+                                    <div style="font-size: 16px; font-weight: bold; line-height: 1.4;">
+                                        <a href="{row['link']}" target="_blank" style="text-decoration: none; color: #60A5FA;">{row['title']}</a>
+                                    </div>
+                                    <div style="font-size: 13px; color: #94A3B8; margin-top: 6px;">
+                                        <span>📰 {row['source']}</span> &nbsp;|&nbsp; 
+                                        <span>⏰ {row['Time (IST)']} ({row['Relative Time']})</span>
+                                    </div>
                                 </div>
-                                <div style="font-size: 13px; color: #94A3B8; margin-top: 6px;">
-                                    <span>📰 {row['source']}</span> &nbsp;|&nbsp; 
-                                    <span>⏰ {row['Time (IST)']} ({row['Relative Time']})</span>
-                                </div>
-                            </div>
-                            """,
-                            unsafe_allow_html=True
-                        )
-                    with col_del:
-                        if st.button("🗑️", key=f"del_{idx}_{row['title'][:20]}", help="Delete this article permanently from spreadsheet"):
-                            with st.spinner("Deleting..."):
-                                if delete_article(row['title'], user_email):
-                                    st.cache_data.clear()
-                                    st.toast("Article deleted successfully!", icon="🗑️")
-                                    st.rerun()
-                                else:
-                                    st.error("Failed to delete.")
+                                """,
+                                unsafe_allow_html=True
+                            )
+                        with col_del:
+                            # Unique key scoped per tab/company name to prevent Streamlit key collisions
+                            if st.button("🗑️", key=f"del_{comp_name}_{idx}_{row['title'][:20]}", help="Delete this article permanently from spreadsheet"):
+                                with st.spinner("Deleting..."):
+                                    if delete_article(row['title'], user_email):
+                                        st.cache_data.clear()
+                                        st.toast("Article deleted successfully!", icon="🗑️")
+                                        st.rerun()
+                                    else:
+                                        st.error("Failed to delete.")
 
